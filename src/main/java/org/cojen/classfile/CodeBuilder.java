@@ -36,6 +36,7 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
     private final InstructionList mInstructions;
 
     private final LocalVariable mThisReference;
+    private final VerificationInfo.Type mThisType;
     private final LocalVariable[] mParameters;
 
     private final int mTarget;
@@ -85,12 +86,18 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
             mTarget = 0x00010000;
         }
 
+        boolean generateVerificationInfo = mTarget >= 0x00010006;
+
         mCodeAttr = info.getCodeAttr();
         mClassFile = info.getClassFile();
         mCp = mClassFile.getConstantPool();
-        mInstructions = new InstructionList(saveLocalVariableInfo);
+        mInstructions = new InstructionList(mCp, saveLocalVariableInfo, generateVerificationInfo);
 
         mCodeAttr.setCodeBuffer(this);
+
+        if (generateVerificationInfo) {
+            mCodeAttr.setInitialStackMapFrame(info);
+        }
 
         mSaveLineNumberInfo = saveLineNumberInfo;
         mSaveLocalVariableInfo = saveLocalVariableInfo;
@@ -102,12 +109,19 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
 
         if (info.getModifiers().isStatic()) {
             mThisReference = null;
+            mThisType = null;
         } else {
-            localVar = mInstructions.createLocalParameter("this", mClassFile.getType());
-            mThisReference = localVar;
+            mThisReference = mInstructions.createLocalParameter("this", mClassFile.getType());
+
+            if (info.getName().equals("<init>")) {
+                // FIXME: Broken. Assumes that this is always uninitialized.
+                mThisType = VerificationInfo.uninitializedThisType();
+            } else {
+                mThisType = VerificationInfo.toType(mThisReference.getType());
+            }
 
             if (saveLocalVariableInfo) {
-                mCodeAttr.localVariableUse(localVar);
+                mCodeAttr.localVariableUse(mThisReference);
             }
         }
 
@@ -149,9 +163,13 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
         return mInstructions.getExceptionHandlers();
     }
 
+    public VerificationInfo[] getVerificationInfos() {
+        return mInstructions.getVerificationInfos();
+    }
+
     /**
      * @param pushed type of argument pushed to operand stack after instruction
-     * executes; pass TypeDesc.VOID if nothing
+     * executes; pass null if nothing
      */
     private void addInstruction(int stackAdjust, TypeDesc pushed, byte opcode) {
         mInstructions.new SimpleInstruction(stackAdjust, pushed, new byte[] {opcode});
@@ -159,7 +177,7 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
 
     /**
      * @param pushed type of argument pushed to operand stack after instruction
-     * executes; pass TypeDesc.VOID if nothing
+     * executes; pass null if nothing
      */
     private void addInstruction(int stackAdjust, TypeDesc pushed, byte opcode, byte operand) {
         mInstructions.new SimpleInstruction(stackAdjust, pushed, new byte[] {opcode, operand});
@@ -167,7 +185,7 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
 
     /**
      * @param pushed type of argument pushed to operand stack after instruction
-     * executes; pass TypeDesc.VOID if nothing
+     * executes; pass null if nothing
      */
     private void addInstruction(int stackAdjust, TypeDesc pushed, byte opcode, short operand) {
         mInstructions.new SimpleInstruction
@@ -177,7 +195,7 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
 
     /**
      * @param pushed type of argument pushed to operand stack after instruction
-     * executes; pass TypeDesc.VOID if nothing
+     * executes; pass null if nothing
      */
     private void addInstruction(int stackAdjust, TypeDesc pushed, byte opcode,
                                 ConstantInfo operand) {
@@ -206,18 +224,30 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
         return mParameters[index];
     }
 
+    public LocalVariable getThis() {
+        LocalVariable var = mThisReference;
+        if (var == null) {
+            throw new IllegalStateException("Static method has no \"this\" reference");
+        }
+        return var;
+    }
+
+    public LocalVariable createLocalVariable(TypeDesc type) {
+        return createLocalVariable(null, type, -1);
+    }
+
     public LocalVariable createLocalVariable(String name, TypeDesc type) {
-        LocalVariable localVar = mInstructions.createLocalVariable(name, type);
+        return createLocalVariable(name, type, -1);
+    }
+
+    public LocalVariable createLocalVariable(String name, TypeDesc type, int num) {
+        LocalVariable localVar = mInstructions.createLocalVariable(name, type, num);
 
         if (mSaveLocalVariableInfo) {
             mCodeAttr.localVariableUse(localVar);
         }
 
         return localVar;
-    }
-
-    public LocalVariable createLocalVariable(TypeDesc type) {
-        return createLocalVariable(null, type);
     }
 
     public Label createLabel() {
@@ -263,7 +293,8 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
     // load-constant-to-stack style instructions
 
     public void loadNull() {
-        addInstruction(1, null, Opcode.ACONST_NULL);
+        mInstructions.new SimpleInstruction(1, VerificationInfo.nullType(),
+                                            new byte[] {Opcode.ACONST_NULL});
     }
 
     public void loadConstant(String value) {
@@ -466,13 +497,12 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
         if (local == null) {
             throw new IllegalArgumentException("No local variable specified");
         }
-        int stackAdjust = local.getType().isDoubleWord() ? 2 : 1;
-        mInstructions.new LoadLocalInstruction(stackAdjust, local);
+        mInstructions.new LoadLocalInstruction(local);
     }
 
     public void loadThis() {
         if (mThisReference != null) {
-            loadLocal(mThisReference);
+            mInstructions.new LoadLocalInstruction(mThisReference, mThisType);
         } else {
             throw new IllegalStateException
                 ("Attempt to load \"this\" reference in a static method");
@@ -485,8 +515,7 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
         if (local == null) {
             throw new IllegalArgumentException("No local variable specified");
         }
-        int stackAdjust = local.getType().isDoubleWord() ? -2 : -1;
-        mInstructions.new StoreLocalInstruction(stackAdjust, local);
+        mInstructions.new StoreLocalInstruction(local);
     }
 
     // load-to-stack-from-array style instructions
@@ -564,7 +593,7 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
             break;
         }
 
-        addInstruction(stackAdjust, TypeDesc.VOID, op);
+        addInstruction(stackAdjust, null, op);
     }
 
     // load-field-to-stack style instructions
@@ -659,13 +688,13 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
         } else {
             stackAdjust--;
         }
-        addInstruction(stackAdjust, TypeDesc.VOID, opcode, info);
+        addInstruction(stackAdjust, null, opcode, info);
     }
 
     // return style instructions
 
     public void returnVoid() {
-        addInstruction(0, TypeDesc.VOID, Opcode.RETURN);
+        addInstruction(0, null, Opcode.RETURN);
     }
 
     public void returnValue(TypeDesc type) {
@@ -700,7 +729,7 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
             break;
         }
 
-        addInstruction(stackAdjust, TypeDesc.VOID, op);
+        addInstruction(stackAdjust, null, op);
     }
 
     // numerical conversion style instructions
@@ -1139,20 +1168,32 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
 
         TypeDesc pushed;
         switch (op) {
-        case Opcode.I2F:
-            pushed = TypeDesc.FLOAT;
-            break;
-        case Opcode.L2D:
-            pushed = TypeDesc.DOUBLE;
-            break;
+        case Opcode.L2I:
         case Opcode.F2I:
+        case Opcode.D2I:
+        case Opcode.I2B:
+        case Opcode.I2C:
+        case Opcode.I2S:
+        default:
             pushed = TypeDesc.INT;
             break;
+
+        case Opcode.I2L:
+        case Opcode.F2L:
         case Opcode.D2L:
             pushed = TypeDesc.LONG;
             break;
-        default:
-            pushed = TypeDesc.VOID;
+
+        case Opcode.I2F:
+        case Opcode.L2F:
+        case Opcode.D2F:
+            pushed = TypeDesc.FLOAT;
+            break;
+
+        case Opcode.I2D:
+        case Opcode.L2D:
+        case Opcode.F2D:
+            pushed = TypeDesc.DOUBLE;
             break;
         }
 
@@ -1454,16 +1495,17 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
         mInstructions.new SwitchInstruction(cases, locations, defaultLocation);
     }
 
+    @Deprecated
     public void jsr(Location location) {
         // Adjust the stack by one to make room for the return address.
         branch(1, location, Opcode.JSR);
     }
 
+    @Deprecated
     public void ret(LocalVariable local) {
         if (local == null) {
             throw new IllegalArgumentException("No local variable specified");
         }
-
         mInstructions.new RetInstruction(local);
     }
 
@@ -1594,12 +1636,12 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
     }
 
     public void throwObject() {
-        addInstruction(-1, TypeDesc.VOID, Opcode.ATHROW);
+        addInstruction(-1, null, Opcode.ATHROW);
     }
 
     public void checkCast(TypeDesc type) {
         ConstantInfo info = mCp.addConstantClass(type);
-        addInstruction(0, TypeDesc.VOID, Opcode.CHECKCAST, info);
+        addInstruction(0, type, Opcode.CHECKCAST, info);
     }
 
     public void instanceOf(TypeDesc type) {
@@ -1626,18 +1668,18 @@ public class CodeBuilder extends AbstractCodeAssembler implements CodeBuffer, Co
     }
 
     public void monitorEnter() {
-        addInstruction(-1, TypeDesc.VOID, Opcode.MONITORENTER);
+        addInstruction(-1, null, Opcode.MONITORENTER);
     }
 
     public void monitorExit() {
-        addInstruction(-1, TypeDesc.VOID, Opcode.MONITOREXIT);
+        addInstruction(-1, null, Opcode.MONITOREXIT);
     }
 
     public void nop() {
-        addInstruction(0, TypeDesc.VOID, Opcode.NOP);
+        addInstruction(0, null, Opcode.NOP);
     }
 
     public void breakpoint() {
-        addInstruction(0, TypeDesc.VOID, Opcode.BREAKPOINT);
+        addInstruction(0, null, Opcode.BREAKPOINT);
     }
 }

@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import org.cojen.classfile.attribute.Annotation;
 import org.cojen.classfile.attribute.AnnotationsAttr;
+import org.cojen.classfile.attribute.BootstrapMethodsAttr;
 import org.cojen.classfile.attribute.DeprecatedAttr;
 import org.cojen.classfile.attribute.InnerClassesAttr;
 import org.cojen.classfile.attribute.RuntimeInvisibleAnnotationsAttr;
@@ -341,6 +342,8 @@ public class ClassFile {
     private int mAnonymousInnerClassCount = 0;
     private InnerClassesAttr mInnerClassesAttr;
 
+    private BootstrapMethodsAttr mBootstrapMethodsAttr;
+
     // Is non-null for inner classes.
     private ClassFile mOuterClass;
 
@@ -483,12 +486,20 @@ public class ClassFile {
         for (int i=0; i<size; i++) {
             MethodInfo method = mMethods.get(i);
             String name = method.getName();
-            if (!"<init>".equals(name) && !"<clinit>".equals(name)) {
+            if (!method.isConstructor() && !method.isInitializer()) {
                 methodsOnly.add(method);
             }
         }
 
         return methodsOnly.toArray(new MethodInfo[methodsOnly.size()]);
+    }
+
+    /**
+     * Returns all the methods, constructors and initializers defined in this
+     * class.
+     */
+    public MethodInfo[] getAllMethods() {
+        return mMethods.toArray(new MethodInfo[mMethods.size()]);
     }
 
     /**
@@ -500,7 +511,7 @@ public class ClassFile {
 
         for (int i=0; i<size; i++) {
             MethodInfo method = mMethods.get(i);
-            if ("<init>".equals(method.getName())) {
+            if (method.isConstructor()) {
                 ctorsOnly.add(method);
             }
         }
@@ -517,7 +528,7 @@ public class ClassFile {
 
         for (int i=0; i<size; i++) {
             MethodInfo method = mMethods.get(i);
-            if ("<clinit>".equals(method.getName())) {
+            if (method.isInitializer()) {
                 return method;
             }
         }
@@ -738,6 +749,14 @@ public class ClassFile {
     }
     
     /**
+     * Add a field to this class, by copying the modifiers, name and type of
+     * another field.
+     */
+    public FieldInfo addField(FieldInfo field) {
+        return addField(field.getModifiers(), field.getName(), field.getType());
+    }
+
+    /**
      * Add a method to this class.
      *
      * @param ret Is null if method returns void.
@@ -789,6 +808,14 @@ public class ClassFile {
         MethodDeclarationParser p = new MethodDeclarationParser(declaration);
         return addMethod(p.getModifiers(), p.getMethodName(),
                          p.getReturnType(), p.getParameters());
+    }
+
+    /**
+     * Add a method, constructor or initializer to this class, by copying the
+     * modifiers, name and descriptor of another method.
+     */
+    public MethodInfo addMethod(MethodInfo method) {
+        return addMethod(method.getModifiers(), method.getName(), method.getMethodDescriptor());
     }
 
     /**
@@ -924,9 +951,20 @@ public class ClassFile {
     }
 
     /**
+     * Returns null if invokedynamic isn't used in this class.
+     */
+    public BootstrapMethodsAttr getBootstrapMethodsAttr() {
+        return mBootstrapMethodsAttr;
+    }
+
+    /**
      * Add an attribute to this class.
      */
     public void addAttribute(Attribute attr) {
+        if (attr.getConstantPool() != mCp) {
+            attr = attr.copyTo(mCp);
+        }
+
         if (attr instanceof SourceFileAttr) {
             if (mSource != null) {
                 mAttributes.remove(mSource);
@@ -937,6 +975,11 @@ public class ClassFile {
                 mAttributes.remove(mInnerClassesAttr);
             }
             mInnerClassesAttr = (InnerClassesAttr)attr;
+        } else if (attr instanceof BootstrapMethodsAttr) {
+            if (mBootstrapMethodsAttr != null) {
+                mAttributes.remove(mBootstrapMethodsAttr);
+            }
+            mBootstrapMethodsAttr = (BootstrapMethodsAttr)attr;
         }
 
         mAttributes.add(attr);
@@ -1019,13 +1062,28 @@ public class ClassFile {
             target = minor == 0 ? "1.4" : null;
             break;
         case 49:
-            target = minor == 0 ? "1.5" : null;
+            target = minor == 0 ? "5" : null;
             break;
         case 50:
-            target = minor == 0 ? "1.6" : null;
+            target = minor == 0 ? "6" : null;
             break;
         case 51:
-            target = minor == 0 ? "1.7" : null;
+            target = minor == 0 ? "7" : null;
+            break;
+        case 52:
+            target = minor == 0 ? "8" : null;
+            break;
+        case 53:
+            target = minor == 0 ? "9" : null;
+            break;
+        case 54:
+            target = minor == 0 ? "10" : null;
+            break;
+        case 55:
+            target = minor == 0 ? "11" : null;
+            break;
+        case 56:
+            target = minor == 0 ? "12" : null;
             break;
         }
 
@@ -1060,6 +1118,32 @@ public class ClassFile {
      * Writes the ClassFile to the given DataOutput.
      */
     public void writeTo(DataOutput dout) throws IOException {
+        checkSize(mInterfaces, 65535, "Interface");
+        checkSize(mFields, 65535, "Field");
+        checkSize(mMethods, 65535, "Method");
+        checkSize(mAttributes, 65535, "Attribute");
+
+        {
+            int size = mFields.size();
+            for (int i=0; i<size; i++) {
+                mFields.get(i).prepare();
+            }
+        }
+
+        {
+            int size = mMethods.size();
+            for (int i=0; i<size; i++) {
+                mMethods.get(i).prepare();
+            }
+        }
+
+        {
+            int size = mAttributes.size();
+            for (int i=0; i<size; i++) {
+                mAttributes.get(i).prepare();
+            }
+        }
+
         dout.writeInt(MAGIC);
         dout.writeInt(mVersion);
 
@@ -1080,45 +1164,44 @@ public class ClassFile {
         } else {
             dout.writeShort(0);
         }
-        
-        int size = mInterfaces.size();
-        if (size > 65535) {
-            throw new IllegalStateException("Interfaces count cannot exceed 65535: " + size);
+
+        {
+            int size = mInterfaces.size();
+            dout.writeShort(size);
+            for (int i=0; i<size; i++) {
+                dout.writeShort(mInterfaces.get(i).getIndex());
+            }
         }
-        dout.writeShort(size);
-        for (int i=0; i<size; i++) {
-            int index = mInterfaces.get(i).getIndex();
-            dout.writeShort(index);
+
+        {
+            int size = mFields.size();
+            dout.writeShort(size);
+            for (int i=0; i<size; i++) {
+                mFields.get(i).writeTo(dout);
+            }
         }
-        
-        size = mFields.size();
-        if (size > 65535) {
-            throw new IllegalStateException("Field count cannot exceed 65535: " + size);
+
+        {
+            int size = mMethods.size();
+            dout.writeShort(size);
+            for (int i=0; i<size; i++) {
+                mMethods.get(i).writeTo(dout);
+            }
         }
-        dout.writeShort(size);
-        for (int i=0; i<size; i++) {
-            FieldInfo field = mFields.get(i);
-            field.writeTo(dout);
+
+        {
+            int size = mAttributes.size();
+            dout.writeShort(size);
+            for (int i=0; i<size; i++) {
+                mAttributes.get(i).writeTo(dout);
+            }
         }
-        
-        size = mMethods.size();
-        if (size > 65535) {
-            throw new IllegalStateException("Method count cannot exceed 65535: " + size);
-        }
-        dout.writeShort(size);
-        for (int i=0; i<size; i++) {
-            MethodInfo method = mMethods.get(i);
-            method.writeTo(dout);
-        }
-        
-        size = mAttributes.size();
-        if (size > 65535) {
-            throw new IllegalStateException("Attribute count cannot exceed 65535: " + size);
-        }
-        dout.writeShort(size);
-        for (int i=0; i<size; i++) {
-            Attribute attr = mAttributes.get(i);
-            attr.writeTo(dout);
+    }
+
+    private void checkSize(List<?> list, int maxSize, String desc) {
+        if (list.size() > maxSize) {
+            throw new IllegalStateException
+                (desc + " count cannot exceed " + maxSize + ": " + list.size());
         }
     }
 
@@ -1129,12 +1212,10 @@ public class ClassFile {
             buf.append(modStr);
             buf.append(' ');
         }
-        if (getModifiers().isInterface()) {
-            buf.append("interface");
-        } else {
+        if (!getModifiers().isInterface()) {
             buf.append("class");
+            buf.append(' ');
         }
-        buf.append(' ');
         buf.append(getClassName());
 
         return buf.toString();

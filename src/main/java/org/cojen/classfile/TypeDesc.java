@@ -319,7 +319,7 @@ public abstract class TypeDesc extends Descriptor implements Serializable {
             case 'D':
                 type = DOUBLE;
                 break;
-            case 'L':
+            case 'L': case 'Q':
                 if (dim > 0) {
                     rootDesc = rootDesc.substring(dim);
                     cursor = 1;

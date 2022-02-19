@@ -227,6 +227,8 @@ public class Opcode {
     public final static byte GOTO_W = (byte)200;
     public final static byte JSR_W = (byte)201;
     public final static byte BREAKPOINT = (byte)202;
+    public final static byte ACONST_INIT = (byte)203;
+    public final static byte WITHFIELD = (byte)204;
 
     /**
      * @exception IllegalArgumentException if opcode is invalid
@@ -540,6 +542,8 @@ public class Opcode {
             "goto_w",
             "jsr_w",
             "breakpoint",
+            "aconst_init",
+            "withfield",
         };
     }
 }

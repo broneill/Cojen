@@ -184,14 +184,12 @@ public class Modifiers {
     }
 
     private static int toEnum(int bitmask, boolean b) {
-        // Enum re-uses the Modifier.NATIVE modifier, which used to only apply
-        // to methods.
         if (b) {
-            return (bitmask | Modifier.NATIVE) &
+            return (bitmask | 0x4000) &
                 (~Modifier.ABSTRACT & ~Modifier.INTERFACE &
                  ~Modifier.STRICT & ~Modifier.SYNCHRONIZED);
         } else {
-            return bitmask & ~Modifier.NATIVE;
+            return bitmask & ~0x4000;
         }
     }
 
@@ -272,7 +270,7 @@ public class Modifiers {
     }
 
     public boolean isEnum() {
-        return Modifier.isNative(mBitmask);
+        return (mBitmask & 0x4000) != 0;
     }
 
     public boolean isVarArgs() {

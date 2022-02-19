@@ -42,7 +42,10 @@ public abstract class ConstantInfo {
     public static final int TAG_NAME_AND_TYPE = 12;
     public static final int TAG_METHOD_HANDLE = 15;
     public static final int TAG_METHOD_TYPE = 16;
-    public static final int TAG_METHOD_INVOKE_DYNAMIC = 18;
+    public static final int TAG_DYNAMIC_CONSTANT = 17;
+    public static final int TAG_INVOKE_DYNAMIC = 18;
+    public static final int TAG_MODULE = 19;
+    public static final int TAG_PACKAGE = 20;
 
     // mIndex is manipulated by ConstantPool
     int mIndex = -1;
@@ -60,6 +63,12 @@ public abstract class ConstantInfo {
     public int getIndex() {
         return mIndex;
     }
+
+    /**
+     * Returns a new instance of this ConstantInfo, except stored in a
+     * different ConstantPool.
+     */
+    public abstract ConstantInfo copyTo(ConstantPool cp);
 
     protected boolean hasPriority() {
         return false;

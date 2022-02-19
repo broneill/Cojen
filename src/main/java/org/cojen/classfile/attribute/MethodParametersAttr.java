@@ -1,5 +1,5 @@
 /*
- *  Copyright 2004-2010 Brian S O'Neill
+ *  Copyright 2021 Cojen.org
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -19,39 +19,45 @@ package org.cojen.classfile.attribute;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+
 import org.cojen.classfile.Attribute;
 import org.cojen.classfile.ConstantPool;
+
+import org.cojen.classfile.constant.ConstantUTFInfo;
 
 /**
  * 
  *
  * @author Brian S O'Neill
  */
-public class UnknownAttr extends Attribute {
-    private final byte[] mData;
-
-    public UnknownAttr(ConstantPool cp, String name, byte[] data) {
-        super(cp, name);
-        mData = (byte[]) data.clone();
-    }
-
-    public UnknownAttr(ConstantPool cp, String name, int length, DataInput din)
+public class MethodParametersAttr extends Attribute {
+    public MethodParametersAttr(ConstantPool cp, String name, int length, DataInput din)
         throws IOException
     {
         super(cp, name);
-        mData = new byte[length];
-        din.readFully(mData);
+        System.out.println("MethodParameters");
+        int paramCount = din.readUnsignedByte();
+        for (int i=0; i<paramCount; i++) {
+            int index = din.readUnsignedShort();
+            ConstantUTFInfo paramName = (ConstantUTFInfo) cp.getConstant(index);
+            int flags = din.readUnsignedShort();
+            System.out.println("  param: " + paramName.getValue() + ", flags: " +
+                               Integer.toUnsignedString(flags, 16));
+        }
     }
 
-    public UnknownAttr copyTo(ConstantPool cp) {
-        return new UnknownAttr(cp, getName(), mData);
+    public MethodParametersAttr copyTo(ConstantPool cp) {
+        // FIXME
+        throw null;
     }
 
     public int getLength() {
-        return mData.length;
+        // FIXME
+        throw null;
     }
     
     public void writeDataTo(DataOutput dout) throws IOException {
-        dout.write(mData);
+        // FIXME
+        throw null;
     }
 }

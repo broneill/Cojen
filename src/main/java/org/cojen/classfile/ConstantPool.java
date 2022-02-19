@@ -17,7 +17,7 @@
 package org.cojen.classfile;
 
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -32,9 +32,14 @@ import org.cojen.classfile.constant.ConstantFieldInfo;
 import org.cojen.classfile.constant.ConstantFloatInfo;
 import org.cojen.classfile.constant.ConstantIntegerInfo;
 import org.cojen.classfile.constant.ConstantInterfaceMethodInfo;
+import org.cojen.classfile.constant.ConstantInvokeDynamicInfo;
 import org.cojen.classfile.constant.ConstantLongInfo;
+import org.cojen.classfile.constant.ConstantMethodHandleInfo;
 import org.cojen.classfile.constant.ConstantMethodInfo;
+import org.cojen.classfile.constant.ConstantMethodTypeInfo;
+import org.cojen.classfile.constant.ConstantModuleInfo;
 import org.cojen.classfile.constant.ConstantNameAndTypeInfo;
+import org.cojen.classfile.constant.ConstantPackageInfo;
 import org.cojen.classfile.constant.ConstantStringInfo;
 import org.cojen.classfile.constant.ConstantUTFInfo;
 
@@ -54,7 +59,9 @@ import org.cojen.classfile.constant.ConstantUTFInfo;
  */
 public class ConstantPool {
     // A set of ConstantInfo objects.
-    private Map<ConstantInfo, ConstantInfo> mConstants = new HashMap<ConstantInfo, ConstantInfo>();
+    private final Map<ConstantInfo, ConstantInfo> mConstants =
+        new LinkedHashMap<ConstantInfo, ConstantInfo>();
+
     // Indexed list of constants.
     private Vector<ConstantInfo> mIndexedConstants;
     private int mEntries;
@@ -361,6 +368,9 @@ public class ConstantPool {
 
             case ConstantInfo.TAG_CLASS:
             case ConstantInfo.TAG_STRING:
+            case ConstantInfo.TAG_METHOD_TYPE:
+            case ConstantInfo.TAG_MODULE:
+            case ConstantInfo.TAG_PACKAGE:
                 constant = new TempEntry(tag, din.readUnsignedShort());
                 break;
 
@@ -368,27 +378,15 @@ public class ConstantPool {
             case ConstantInfo.TAG_METHOD:
             case ConstantInfo.TAG_INTERFACE_METHOD:
             case ConstantInfo.TAG_NAME_AND_TYPE:
+            case ConstantInfo.TAG_DYNAMIC_CONSTANT:
+            case ConstantInfo.TAG_INVOKE_DYNAMIC:
                 constant = new TempEntry
                     (tag, (din.readShort() << 16) | (din.readUnsignedShort()));
                 break;
 
             case ConstantInfo.TAG_METHOD_HANDLE:
-                // FIXME: testing
-                din.skipBytes(3);
-                constant = new ConstantUTFInfo("method_handle");
-                break;
-
-            case ConstantInfo.TAG_METHOD_TYPE:
-                // FIXME: testing
-                din.skipBytes(2);
-                constant = new ConstantUTFInfo("method_type");
-                break;
-
-            case ConstantInfo.TAG_METHOD_INVOKE_DYNAMIC:
-                // FIXME: testing
-                din.skipBytes(4);
-                constant = new ConstantNameAndTypeInfo
-                    (new ConstantUTFInfo("invoke_dynamic"), new ConstantUTFInfo("L_FIXME;"));
+                constant = new TempEntry
+                    (tag, (din.readUnsignedByte() << 16) | (din.readUnsignedShort()));
                 break;
 
             default:
@@ -437,6 +435,29 @@ public class ConstantPool {
             ci = new ConstantStringInfo((ConstantUTFInfo)ci1);
             break;
 
+        case ConstantInfo.TAG_METHOD_TYPE:
+            ci = new ConstantMethodTypeInfo((ConstantUTFInfo) ci1);
+            break;
+
+        case ConstantInfo.TAG_MODULE:
+            ci = new ConstantModuleInfo((ConstantUTFInfo) ci1);
+            break;
+
+        case ConstantInfo.TAG_PACKAGE:
+            ci = new ConstantPackageInfo((ConstantUTFInfo) ci1);
+            break;
+
+        case ConstantUTFInfo.TAG_METHOD_HANDLE: {
+            ci = new ConstantMethodHandleInfo(data >>> 16, ci1);
+            break;
+        }
+
+        case ConstantInfo.TAG_DYNAMIC_CONSTANT:
+        case ConstantInfo.TAG_INVOKE_DYNAMIC: {
+            ci = new ConstantInvokeDynamicInfo(data >>> 16, (ConstantNameAndTypeInfo)ci1);
+            break;
+        }
+
         case ConstantInfo.TAG_FIELD:
         case ConstantInfo.TAG_METHOD:
         case ConstantInfo.TAG_INTERFACE_METHOD:
@@ -478,13 +499,17 @@ public class ConstantPool {
     }
 
     private static class TempEntry extends ConstantInfo {
-        public int mTag;
-        public int mData;
+        public final int mTag;
+        public final int mData;
 
         public TempEntry(int tag, int data) {
             super(-1);
             mTag = tag;
             mData = data;
+        }
+
+        public TempEntry copyTo(ConstantPool cp) {
+            return new TempEntry(mTag, mData);
         }
     }
 }

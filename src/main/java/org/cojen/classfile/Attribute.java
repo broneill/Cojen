@@ -19,6 +19,7 @@ package org.cojen.classfile;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import org.cojen.classfile.attribute.BootstrapMethodsAttr;
 import org.cojen.classfile.attribute.CodeAttr;
 import org.cojen.classfile.attribute.ConstantValueAttr;
 import org.cojen.classfile.attribute.DeprecatedAttr;
@@ -27,6 +28,7 @@ import org.cojen.classfile.attribute.ExceptionsAttr;
 import org.cojen.classfile.attribute.InnerClassesAttr;
 import org.cojen.classfile.attribute.LineNumberTableAttr;
 import org.cojen.classfile.attribute.LocalVariableTableAttr;
+import org.cojen.classfile.attribute.MethodParametersAttr;
 import org.cojen.classfile.attribute.RuntimeInvisibleAnnotationsAttr;
 import org.cojen.classfile.attribute.RuntimeInvisibleParameterAnnotationsAttr;
 import org.cojen.classfile.attribute.RuntimeVisibleAnnotationsAttr;
@@ -48,6 +50,7 @@ import org.cojen.classfile.constant.ConstantUTFInfo;
 public abstract class Attribute {
     final static Attribute[] NO_ATTRIBUTES = new Attribute[0];
 
+    public static final String BOOTSTRAP_METHODS = "BootstrapMethods";
     public static final String CODE = "Code";
     public static final String CONSTANT_VALUE = "ConstantValue";
     public static final String DEPRECATED = "Deprecated";
@@ -66,6 +69,7 @@ public abstract class Attribute {
     public static final String RUNTIME_INVISIBLE_PARAMETER_ANNOTATIONS =
         "RuntimeInvisibleParamaterAnnotations";
     public static final String STACK_MAP_TABLE = "StackMapTable";
+    public static final String METHOD_PARAMETERS = "MethodParameters";
 
     /** The ConstantPool that this attribute is defined against. */
     private final ConstantPool mCp;
@@ -92,11 +96,11 @@ public abstract class Attribute {
     public String getName() {
         return mName;
     }
-    
+
     public ConstantUTFInfo getNameConstant() {
         return mNameConstant;
     }
-    
+
     /**
      * Some attributes have sub-attributes. Default implementation returns an
      * empty array.
@@ -106,10 +110,23 @@ public abstract class Attribute {
     }
 
     /**
+     * Returns a new instance of this Attribute, except stored in a different
+     * ConstantPool.
+     */
+    public abstract Attribute copyTo(ConstantPool cp);
+
+    /**
+     * Perform final preparations before constant pool is written out. Default
+     * implementation does nothing.
+     */
+    public void prepare() {
+    }
+
+    /**
      * Returns the length (in bytes) of this attribute in the class file.
      */
     public abstract int getLength();
-    
+
     /**
      * This method writes the 16 bit name constant index followed by the
      * 32 bit attribute length, followed by the attribute specific data.
@@ -170,6 +187,11 @@ public abstract class Attribute {
                                          DataInput din) throws IOException {
             if (name.length() > 0) {
                 switch (name.charAt(0)) {
+                case 'B':
+                    if (name.equals(BOOTSTRAP_METHODS)) {
+                        return new BootstrapMethodsAttr(cp, name, length, din);
+                    }
+                    break;
                 case 'C':
                     if (name.equals(CODE)) {
                         return new CodeAttr(cp, name, length, din, mAttrFactory);
@@ -199,6 +221,11 @@ public abstract class Attribute {
                         return new LineNumberTableAttr(cp, name, length, din);
                     } else if (name.equals(LOCAL_VARIABLE_TABLE)) {
                         return new LocalVariableTableAttr(cp, name, length, din);
+                    }
+                    break;
+                case 'M':
+                    if (name.equals(METHOD_PARAMETERS)) {
+                        return new MethodParametersAttr(cp, name, length, din);
                     }
                     break;
                 case 'R':

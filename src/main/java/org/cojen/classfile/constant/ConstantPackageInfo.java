@@ -1,5 +1,5 @@
 /*
- *  Copyright 2004-2010 Brian S O'Neill
+ *  Copyright 2018 Cojen.org
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,52 +22,58 @@ import org.cojen.classfile.ConstantInfo;
 import org.cojen.classfile.ConstantPool;
 
 /**
- * This class corresponds to the CONSTANT_Integer_info structure as defined in
- * <i>The Java Virtual Machine Specification</i>.
  * 
+ *
  * @author Brian S O'Neill
  */
-public class ConstantIntegerInfo extends ConstantInfo {
-    private final int mValue;
+public class ConstantPackageInfo extends ConstantInfo {
+    private final ConstantUTFInfo mStringConstant;
     
-    public ConstantIntegerInfo(int value) {
-        super(TAG_INTEGER);
-        mValue = value;
-    }
-    
-    public int getValue() {
-        return mValue;
+    public ConstantPackageInfo(ConstantUTFInfo constant) {
+        super(TAG_PACKAGE);
+        mStringConstant = constant;
     }
 
-    public ConstantIntegerInfo copyTo(ConstantPool cp) {
-        return cp.addConstantInteger(mValue);
+    public ConstantPackageInfo(ConstantPool cp, String str) {
+        super(TAG_PACKAGE);
+        mStringConstant = cp.addConstantUTF(str);
+    }
+    
+    public String getValue() {
+        return mStringConstant.getValue();
     }
 
+    @Override
+    public ConstantPackageInfo copyTo(ConstantPool cp) {
+        // FIXME
+        throw null;
+    }
+
+    @Override
     public int hashCode() {
-        return mValue;
+        return mStringConstant.hashCode();
     }
     
+    @Override
     public boolean equals(Object obj) {
         if (this == obj) {
             return true;
         }
-        if (obj instanceof ConstantIntegerInfo) {
-            ConstantIntegerInfo other = (ConstantIntegerInfo)obj;
-            return mValue == other.mValue;
+        if (obj instanceof ConstantPackageInfo) {
+            ConstantPackageInfo other = (ConstantPackageInfo)obj;
+            return mStringConstant.equals(other.mStringConstant);
         }
         return false;
     }
     
-    protected boolean hasPriority() {
-        return true;
-    }
-
+    @Override
     public void writeTo(DataOutput dout) throws IOException {
         super.writeTo(dout);
-        dout.writeInt(mValue);
+        dout.writeShort(mStringConstant.getIndex());
     }
 
+    @Override
     public String toString() {
-        return "CONSTANT_Integer_info: " + mValue;
+        return "CONSTANT_Package_info: " + getValue();
     }
 }

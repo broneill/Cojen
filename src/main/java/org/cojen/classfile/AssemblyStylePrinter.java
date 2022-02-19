@@ -27,6 +27,7 @@ import java.util.Map;
 
 import org.cojen.util.IntHashMap;
 import org.cojen.classfile.attribute.Annotation;
+import org.cojen.classfile.attribute.BootstrapMethodsAttr;
 import org.cojen.classfile.attribute.CodeAttr;
 import org.cojen.classfile.attribute.LocalVariableTableAttr;
 import org.cojen.classfile.attribute.SignatureAttr;
@@ -37,8 +38,11 @@ import org.cojen.classfile.constant.ConstantFieldInfo;
 import org.cojen.classfile.constant.ConstantFloatInfo;
 import org.cojen.classfile.constant.ConstantIntegerInfo;
 import org.cojen.classfile.constant.ConstantInterfaceMethodInfo;
+import org.cojen.classfile.constant.ConstantInvokeDynamicInfo;
 import org.cojen.classfile.constant.ConstantLongInfo;
+import org.cojen.classfile.constant.ConstantMethodHandleInfo;
 import org.cojen.classfile.constant.ConstantMethodInfo;
+import org.cojen.classfile.constant.ConstantMethodTypeInfo;
 import org.cojen.classfile.constant.ConstantNameAndTypeInfo;
 import org.cojen.classfile.constant.ConstantStringInfo;
 import org.cojen.classfile.constant.ConstantUTFInfo;
@@ -148,6 +152,10 @@ class AssemblyStylePrinter implements DisassemblyTool.Printer {
                 println(indent, " * @signature " + sig.getSignature().getValue());
             }
 
+            if (mClassFile.getModifiers().isEnum()) {
+                println(indent, " * @enum");
+            }
+
             println(indent, " */");
         }
 
@@ -250,7 +258,8 @@ class AssemblyStylePrinter implements DisassemblyTool.Printer {
 
     private void disassemble(String indent, FieldInfo field) {
         SignatureAttr sig = field.getSignatureAttr();
-        if (field.isDeprecated() || field.isSynthetic() || sig != null) {
+        Modifiers mods = field.getModifiers();
+        if (field.isDeprecated() || field.isSynthetic() || sig != null || mods.isEnum()) {
             println(indent, "/**");
             if (field.isDeprecated()) {
                 println(indent, " * @deprecated");
@@ -261,6 +270,9 @@ class AssemblyStylePrinter implements DisassemblyTool.Printer {
             if (sig != null) {
                 println(indent, " * @signature " + sig.getSignature().getValue());
             }
+            if (mods.isEnum()) {
+                println(indent, " * @enum");
+            }
             println(indent, " */");
         }
 
@@ -268,7 +280,7 @@ class AssemblyStylePrinter implements DisassemblyTool.Printer {
         disassemble(indent, field.getRuntimeInvisibleAnnotations());
 
         print(indent);
-        disassemble(field.getModifiers());
+        disassemble(mods);
         disassemble(field.getType());
         print(" ");
         print(field.getName());
@@ -421,6 +433,17 @@ class AssemblyStylePrinter implements DisassemblyTool.Printer {
 
     private void disassemble(TypeDesc type) {
         print(type.getFullName());
+    }
+
+    private void disassemble(TypeDesc[] params) {
+        print("(");
+        for (int i=0; i<params.length; i++) {
+            if (i > 0) {
+                print(", ");
+            }
+            disassemble(params[i]);
+        }
+        print(")");
     }
 
     private void disassemble(LocalVariable var) {
@@ -834,6 +857,7 @@ class AssemblyStylePrinter implements DisassemblyTool.Printer {
             case Opcode.ANEWARRAY:
             case Opcode.CHECKCAST:
             case Opcode.INSTANCEOF:
+            case Opcode.ACONST_INIT:
                 constant = getConstant(readUnsignedShort());
                 if (constant instanceof ConstantClassInfo) {
                     disassemble(constant);
@@ -857,6 +881,7 @@ class AssemblyStylePrinter implements DisassemblyTool.Printer {
             case Opcode.PUTSTATIC:
             case Opcode.GETFIELD:
             case Opcode.PUTFIELD:
+            case Opcode.WITHFIELD:
                 constant = getConstant(readUnsignedShort());
                 if (constant instanceof ConstantFieldInfo) {
                     ConstantFieldInfo field = (ConstantFieldInfo)constant;
@@ -879,10 +904,9 @@ class AssemblyStylePrinter implements DisassemblyTool.Printer {
             case Opcode.INVOKESPECIAL:
             case Opcode.INVOKESTATIC:
             case Opcode.INVOKEINTERFACE:
-            case Opcode.INVOKEDYNAMIC:
                 constant = getConstant(readUnsignedShort());
 
-                String className;
+                ConstantClassInfo classInfo;
                 ConstantNameAndTypeInfo nameAndType;
 
                 if (opcode == Opcode.INVOKEINTERFACE) {
@@ -892,49 +916,109 @@ class AssemblyStylePrinter implements DisassemblyTool.Printer {
                         print(constant);
                         break;
                     }
-                    ConstantInterfaceMethodInfo method = 
-                        (ConstantInterfaceMethodInfo)constant;
-                    className =
-                        method.getParentClass().getType().getFullName();
+                    ConstantInterfaceMethodInfo method = (ConstantInterfaceMethodInfo)constant;
+                    classInfo = method.getParentClass();
                     nameAndType = method.getNameAndType();
-                } else if (opcode == Opcode.INVOKEDYNAMIC) {
-                    // Read and ignore extra bytes.
-                    readShort();
-                    className = null;
-                    nameAndType = (ConstantNameAndTypeInfo)constant;
                 } else {
                     if (!(constant instanceof ConstantMethodInfo)) {
                         print(constant);
                         break;
                     }
                     ConstantMethodInfo method = (ConstantMethodInfo)constant;
-                    className =
-                        method.getParentClass().getType().getFullName();
+                    classInfo = method.getParentClass();
                     nameAndType = method.getNameAndType();
                 }
 
-                Descriptor type = nameAndType.getType();
-                if (!(type instanceof MethodDesc)) {
-                    print(type);
-                    break;
-                }
-                disassemble(((MethodDesc)type).getReturnType());
-                print(" ");
-                if (className != null) {
-                    print(className);
-                    print(".");
-                }
-                print(nameAndType.getName());
+                disassembleInvoke(classInfo, nameAndType);
 
-                print("(");
-                TypeDesc[] params = ((MethodDesc)type).getParameterTypes();
-                for (int i=0; i<params.length; i++) {
-                    if (i > 0) {
-                        print(", ");
-                    }
-                    disassemble(params[i]);
+                break;
+
+            case Opcode.INVOKEDYNAMIC:
+                constant = getConstant(readUnsignedShort());
+
+                // Read and ignore extra bytes.
+                readShort();
+
+                ConstantInvokeDynamicInfo info = (ConstantInvokeDynamicInfo)constant;
+
+                BootstrapMethodsAttr.Method bootstrap =
+                    mClassFile.getBootstrapMethodsAttr().getMethod(info.getBootstrapIndex());
+
+                nameAndType = info.getNameAndType();
+                Descriptor type = nameAndType.getType();
+
+                println();
+                String innerIndent1 = indent + "  ";
+
+                boolean isLambda = isLambda(bootstrap);
+
+                print(innerIndent1, "// generated by: ");
+
+                if (isLambda) {
+                    println("LambdaMetafactory");
+                } else {
+                    println(bootstrap.getInfo());
                 }
-                print(")");
+
+                print(innerIndent1, "new ");
+
+                disassemble(((MethodDesc)type).getReturnType());
+                disassemble(((MethodDesc)type).getParameterTypes());
+                println(" {");
+
+                String innerIndent2 = innerIndent1 + "    ";
+                print(innerIndent2);
+
+                println("@Override");
+                print(innerIndent2);
+                print("public ");
+
+                if (isLambda) {
+                    MethodDesc md = ((ConstantMethodTypeInfo)bootstrap.getArg(0)).getDescriptor();
+                    disassemble(md.getReturnType());
+                    print(" ");
+                    print(nameAndType.getName());
+                    disassemble(md.getParameterTypes());
+                } else {
+                    print("<return type>");
+                    print(" ");
+                    print(nameAndType.getName());
+                    print("(");
+                    print("<params>");
+                    print(")");
+                }
+
+                println(" {");
+
+                String innerIndent3 = innerIndent2 + "    ";
+
+                if (isLambda) lambda: {
+                    print(innerIndent3, "// delegate: ");
+                    ConstantInfo delegate =
+                        ((ConstantMethodHandleInfo)bootstrap.getArg(1)).getConstant();
+
+                    if (delegate instanceof ConstantMethodInfo) {
+                        ConstantMethodInfo method = (ConstantMethodInfo)delegate;
+                        classInfo = method.getParentClass();
+                        nameAndType = method.getNameAndType();
+                    } else if (delegate instanceof ConstantInterfaceMethodInfo) {
+                        ConstantInterfaceMethodInfo method = (ConstantInterfaceMethodInfo)delegate;
+                        classInfo = method.getParentClass();
+                        nameAndType = method.getNameAndType();
+                    } else {
+                        print(delegate);
+                        break lambda;
+                    }
+
+                    disassembleInvoke(classInfo, nameAndType);
+                }
+
+                println();
+                println(innerIndent3, "...");
+
+                println(innerIndent2, "}");
+                print(innerIndent1, "};");
+
                 break;
 
                 // End opcodes that load a constant from the constant pool.
@@ -1137,6 +1221,27 @@ class AssemblyStylePrinter implements DisassemblyTool.Printer {
 
             println();
         } // end for loop
+    }
+
+    private void disassembleInvoke(ConstantClassInfo classInfo,
+                                   ConstantNameAndTypeInfo nameAndType)
+    {
+        String className = classInfo.getType().getFullName();
+
+        Descriptor type = nameAndType.getType();
+        if (!(type instanceof MethodDesc)) {
+            print(type);
+            return;
+        }
+        disassemble(((MethodDesc)type).getReturnType());
+        print(" ");
+        if (className != null) {
+            print(className);
+            print(".");
+        }
+        print(nameAndType.getName());
+        
+        disassemble(((MethodDesc)type).getParameterTypes());
     }
 
     private void gatherLabels() {
@@ -1491,7 +1596,7 @@ class AssemblyStylePrinter implements DisassemblyTool.Printer {
         println();
         print(indent);
         print("// locals: ");
-        print(frame.getLocalInfos());
+        print(frame.getLocalVariableInfos());
         println();
 
         return frame.getNext();
@@ -1598,6 +1703,32 @@ class AssemblyStylePrinter implements DisassemblyTool.Printer {
 
     private void sortMembers(Object[] members) {
         Arrays.sort(members, new MemberComparator());
+    }
+
+    private static boolean isLambda(BootstrapMethodsAttr.Method bootstrap) {
+        ConstantMethodHandleInfo handleInfo = bootstrap.getInfo();
+
+        if (!(handleInfo.getConstant() instanceof ConstantMethodInfo)) {
+            return false;
+        }
+
+        ConstantMethodInfo methodInfo = (ConstantMethodInfo) handleInfo.getConstant();
+
+        TypeDesc factoryType = TypeDesc.forClass("java.lang.invoke.LambdaMetafactory");
+
+        if (!methodInfo.getParentClass().getType().equals(factoryType)) {
+            return false;
+        }
+
+        if (bootstrap.getArgCount() != 3) {
+            return false;
+        }
+
+        if (!(bootstrap.getArg(0) instanceof ConstantMethodTypeInfo)) {
+            return false;
+        }
+
+        return true;
     }
 
     /**

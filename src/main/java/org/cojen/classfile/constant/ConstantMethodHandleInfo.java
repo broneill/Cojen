@@ -1,5 +1,5 @@
 /*
- *  Copyright 2004-2010 Brian S O'Neill
+ *  Copyright 2018 Cojen.org
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,46 +22,51 @@ import org.cojen.classfile.ConstantInfo;
 import org.cojen.classfile.ConstantPool;
 
 /**
- * This class corresponds to the CONSTANT_Utf8_info structure as defined in
- * <i>The Java Virtual Machine Specification</i>.
  * 
+ *
  * @author Brian S O'Neill
  */
-public class ConstantUTFInfo extends ConstantInfo {
-    private final String mStr;
-    
-    public ConstantUTFInfo(String str) {
-        super(TAG_UTF8);
-        mStr = str;
-    }
-    
-    public String getValue() {
-        return mStr;
+public class ConstantMethodHandleInfo extends ConstantInfo {
+    private final int mKind;
+    private final ConstantInfo mConstant;
+
+    public ConstantMethodHandleInfo(int kind, ConstantInfo constant) {
+        super(TAG_METHOD_HANDLE);
+        mKind = kind;
+        mConstant = constant;
     }
 
-    public ConstantUTFInfo copyTo(ConstantPool cp) {
-        return cp.addConstantUTF(mStr);
+    public int getKind() {
+        return mKind;
     }
 
+    public ConstantInfo getConstant() {
+        return mConstant;
+    }
+
+    @Override
+    public ConstantMethodHandleInfo copyTo(ConstantPool cp) {
+        // FIXME
+        throw null;
+    }
+
+    @Override
     public int hashCode() {
-        return mStr.hashCode();
+        return mKind + mConstant.hashCode() * 31;
     }
-    
+
+    @Override
     public boolean equals(Object obj) {
-        if (obj instanceof ConstantUTFInfo) {
-            ConstantUTFInfo other = (ConstantUTFInfo)obj;
-            return mStr.equals(other.mStr);
+        if (obj instanceof ConstantMethodHandleInfo) {
+            ConstantMethodHandleInfo other = (ConstantMethodHandleInfo) obj;
+            return mKind == other.mKind && mConstant.equals(other.mConstant);
         }
         
         return false;
     }
-    
-    public void writeTo(DataOutput dout) throws IOException {
-        super.writeTo(dout);
-        dout.writeUTF(mStr);
-    }
 
+    @Override
     public String toString() {
-        return "CONSTANT_Utf8_info: " + getValue();
+        return "CONSTANT_MethodHandle_info: " + getKind() + ", " + getConstant();
     }
 }
