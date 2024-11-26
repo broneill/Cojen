@@ -35,14 +35,17 @@ public class MethodParametersAttr extends Attribute {
         throws IOException
     {
         super(cp, name);
-        System.out.println("MethodParameters");
+        //System.out.println("MethodParameters");
         int paramCount = din.readUnsignedByte();
         for (int i=0; i<paramCount; i++) {
             int index = din.readUnsignedShort();
             ConstantUTFInfo paramName = (ConstantUTFInfo) cp.getConstant(index);
             int flags = din.readUnsignedShort();
-            System.out.println("  param: " + paramName.getValue() + ", flags: " +
+            String paramNameStr = paramName == null ? "null" : paramName.getValue();
+            /*
+            System.out.println("  param: " + paramNameStr + ", flags: " +
                                Integer.toUnsignedString(flags, 16));
+            */
         }
     }
 
